@@ -1,0 +1,602 @@
+---
+title: "VehiclePricesProject"
+author: "Rakesh Deshalli Ravi"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+
+
+```{r Loading libraries and Reading the data}
+
+# Install required packages
+# install.packages("olsrr")
+# install.packages("MASS")
+# install.packages("glmnet")
+# install.packages("car")
+# install.packages("ggplot2")
+# install.packages("glmnet")
+
+# Load the packages
+library(olsrr)
+library(MASS)
+library(glmnet)
+library(car)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(reshape2)
+library(caret)
+library(Metrics)
+library(glmnet)
+library(fastDummies)
+library(olsrr)
+
+
+# Read the vehicle prices data
+vehicle_price_data <- read.csv('Australian Vehicle Prices.csv')
+# first 6 records of the data
+head(vehicle_price_data)
+dim(vehicle_price_data)
+```
+
+
+
+
+
+
+```{r Summary}
+summary(vehicle_price_data)
+```
+
+
+```{r Dropping unnecessary columns}
+vehicle_price_data <- subset(vehicle_price_data, select = -c(Model, Car.Suv, Title, CylindersinEngine, ColourExtInt
+))
+head(vehicle_price_data)
+```
+
+
+
+```{r Data Cleaning by splitting the data}
+vehicle_price_data <- separate(vehicle_price_data, Engine, into = c("Cylinders", "EngineDisplacement"), sep = ",")
+
+vehicle_price_data <- separate(vehicle_price_data, FuelConsumption, into = c("Litersper100km", "KmsforLitersper100km"), sep = "/")
+
+# vehicle_price_data <- separate(vehicle_price_data, ColourExtInt, into = c("Exterior Color", "Interior Color"), sep = "/")
+
+vehicle_price_data <- separate(vehicle_price_data, Location, into = c("City", "State"), sep = ", ")
+
+
+head(vehicle_price_data)
+```
+
+```{r Dropping unwanted columns}
+vehicle_price_data <- subset(vehicle_price_data, select = -c(KmsforLitersper100km))
+```
+
+
+
+```{r Removing unwanted characters}
+vehicle_price_data$Cylinders <- as.numeric(gsub("[^0-9]", "", vehicle_price_data$Cylinders))
+
+vehicle_price_data$EngineDisplacement <- as.numeric(gsub("[^0-9.]", "", vehicle_price_data$EngineDisplacement))
+
+vehicle_price_data$Litersper100km <- as.numeric(gsub("[^0-9.]", "", vehicle_price_data$Litersper100km))
+
+# vehicle_price_data$KmsforLitersper100km <- as.numeric(gsub("[^0-9]", "", vehicle_price_data$KmsforLitersper100km))
+
+# vehicle_price_data$CylindersinEngine <- as.numeric(gsub("[^0-9]", "", vehicle_price_data$CylindersinEngine))
+
+vehicle_price_data$Doors <- as.numeric(gsub("[^0-9]", "", vehicle_price_data$Doors))
+
+vehicle_price_data$Seats <- as.numeric(gsub("[^0-9]", "", vehicle_price_data$Seats))
+
+```
+
+
+
+
+```{r Dropping null values and records with '-'}
+# Drop rows with NA values
+vehicle_price_data <- na.omit(vehicle_price_data)
+
+# Drop rows with '-' values
+vehicle_price_data <- vehicle_price_data[!apply(vehicle_price_data == "-", 1, any), ]
+vehicle_price_data
+```
+
+
+```{r Converting character to numerical columns if the column contains numerical values}
+# Function to check and convert columns
+convert_columns_to_numeric <- function(vehicle_price_data) {
+  for (col_name in names(vehicle_price_data)) {
+    # Check if the column can be converted to numeric
+    if (all(!is.na(as.numeric(as.character(vehicle_price_data[[col_name]]))), na.rm = TRUE)) {
+      # Convert column to numeric, ignoring warnings for NAs introduced by coercion
+      suppressWarnings(vehicle_price_data[[col_name]] <- as.numeric(as.character(vehicle_price_data[[col_name]])))
+    }
+  }
+  return(vehicle_price_data)
+}
+
+# Apply the function to dataframe
+vehicle_price_data <- convert_columns_to_numeric(vehicle_price_data)
+
+
+# Check the structure of the modified dataframe
+head(vehicle_price_data)
+
+```
+
+```{r Remove inverted commas}
+# Remove inverted commas (quotation marks) from the Price column
+vehicle_price_data$Price <- gsub("\"", "", vehicle_price_data$Price)
+vehicle_price_data$Kilometres <- gsub("\"", "", vehicle_price_data$Kilometres)
+
+# Convert the character type to numerical type
+vehicle_price_data$Price <- as.numeric(vehicle_price_data$Price)
+vehicle_price_data$Kilometres <- as.numeric(vehicle_price_data$Kilometres)
+vehicle_price_data
+```
+
+
+
+```{r Handling null values}
+vehicle_price_data <- na.omit(vehicle_price_data)
+summary(vehicle_price_data)
+```
+
+```{r Rows and Columns left after preprocessing}
+vehicle_price_data <- data.frame(vehicle_price_data, row.names = NULL)
+head(vehicle_price_data)
+dim(vehicle_price_data)
+```
+
+
+
+```{r Saving the cleaned data}
+# write.csv(vehicle_price_data, "vehicle_price_data_cleaned_v1.csv", row.names = FALSE)
+```
+
+
+
+```{r Filtering numerical and categorical columns}
+# Filter numerical columns
+numerical_cols <- sapply(vehicle_price_data, is.numeric)
+numerical_df <- vehicle_price_data %>% select_if(is.numeric)
+
+# Filter categorical columns
+categorical_cols <- sapply(vehicle_price_data, is.character)
+categorical_df <- vehicle_price_data %>% select_if(is.character)
+```
+
+
+
+```{r}
+summary(numerical_df)
+```
+
+
+
+```{r Histograms}
+# Loop through each column in the dataframe
+for(i in 1:ncol(numerical_df))  {
+    # Create the histogram
+    hist(numerical_df[[i]], 
+         main = paste("Histogram of", colnames(numerical_df)[i]),  # Title of the histogram
+         xlab = colnames(numerical_df)[i],                         # X-axis label
+         ylab = "Frequency",                             # Y-axis label
+         col = "lightblue",                              # Color of the bars
+         border = "black")                               # Color of the border of the bars
+  }
+
+```
+
+```{r Box plots}
+# Create the box plot for Price by UsedorNew
+boxplot(Price ~ UsedOrNew, data = vehicle_price_data,
+        main = "Price by UsedorNew",
+        xlab = "UsedOrNew",
+        ylab = "Price")
+
+# Create the box plot for Price by Transmission
+boxplot(Price ~ Transmission, data = vehicle_price_data,
+        main = "Price by Transmission",
+        xlab = "Transmission",
+        ylab = "Price")
+
+# Create the box plot for Price by Doors
+boxplot(Price ~ Doors, data = vehicle_price_data,
+        main = "Price by Doors",
+        xlab = "Doors",
+        ylab = "Price")
+
+# Create the box plot for Price by Seats
+boxplot(Price ~ Seats, data = vehicle_price_data,
+        main = "Price by Seats",
+        xlab = "Seats",
+        ylab = "Price")
+
+```
+
+
+
+```{r}
+# Pairwise scatter plots for all combinations of numeric variables
+pairs(numerical_df)
+```
+
+```{r Bar plots}
+
+# Loop over all columns
+for (col_name in names(categorical_df)) {
+      if (!(col_name %in% c("City", "Brand"))) {
+  
+      # Create the bar plot
+      p <- ggplot(categorical_df, aes_string(x = col_name)) +
+        geom_bar() +
+        geom_text(stat='count', aes(label=..count..), vjust=-0.5) +
+        labs(title = paste("Bar Plot of", col_name),
+             x = col_name,
+             y = "Count")
+      
+      # Print the plot
+      print(p)
+      }
+}
+
+```
+
+```{r Scatterplots for all the combinations of all numerical variables}
+combinations <- combn(names(numerical_df), 2, simplify = FALSE)
+for (comb in combinations) {
+  p <- ggplot(numerical_df, aes_string(x = comb[1], y = comb[2])) +
+    geom_point() +
+    labs(title = paste("Scatter Plot of", comb[1], "vs", comb[2]),
+         x = comb[1],
+         y = comb[2]) +
+    theme_minimal()
+  
+    # Print the plot
+    print(p)
+}
+```
+
+
+```{r Correlation matrix}
+cor_matrix <- cor(numerical_df)  
+cor_matrix
+```
+```{r Heat map}
+# Melt the correlation matrix for ggplot2
+melted_cor_matrix <- melt(cor_matrix)
+
+# Create a heatmap with ggplot2
+ggplot(data = melted_cor_matrix, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1)) +
+  geom_text(aes(label = sprintf("%.2f", value)), vjust = 1, color = "black", size = 3) +
+  labs(x = '', y = '')
+```
+
+```{r We have City and State columns so we are dropping city column to avoid multicollinearity}
+vehicle_price_data <- subset(vehicle_price_data, select = -c(City))
+```
+
+
+
+```{r Linear regression simple model}
+# Fit an OLS model
+simple_model <- lm(Price ~ ., data = vehicle_price_data)
+
+# Explore the model
+summary(simple_model)
+
+ols_regress(simple_model)
+```
+
+```{r}
+# Fit an OLS model
+simple_model_wo_doors <- lm(Price ~ . - Doors, data = vehicle_price_data)
+
+# Explore the model
+summary(simple_model_wo_doors)
+
+ols_regress(simple_model_wo_doors)
+```
+
+
+```{r Checking multicollinearity}
+vif(simple_model)
+```
+# Manual Variable elimination
+
+```{r Model without brand column}
+# Fit an OLS model
+model <- lm(Price ~ . - EngineDisplacement, data = vehicle_price_data)
+
+# Explore the model
+summary(model)
+```
+```{r Checking multicollinearity}
+vif(model)
+```
+
+
+
+```{r Forward Selection method}
+full_model <- lm(Price ~ ., data = vehicle_price_data)
+
+
+fitStart <- lm(Price ~ 1, data=vehicle_price_data) # Start with an intercept-only model
+fitForward <- stepAIC(fitStart, direction="forward", scope=formula(model))
+
+# Print the selected model
+summary(fitForward)
+
+```
+
+
+```{r Backward Elimination}
+fitFull <- lm(Price ~ ., data=vehicle_price_data) # Start with a full model
+fitBackward <- stepAIC(fitFull, direction="backward")
+
+# Print the selected model
+summary(fitBackward)
+
+```
+
+```{r Both Forward and Backward Combination}
+
+full_model <- lm(Price ~ ., data = vehicle_price_data)
+fitStart <- lm(Price ~ 1, data=vehicle_price_data) # Start with an intercept-only model
+fitStepwise <- stepAIC(fitStart, direction="both", scope=formula(full_model))
+
+# Print the selected model
+summary(fitStepwise)
+
+```
+
+```{r All subsets model}
+# Taking lot of time to execute
+# library(leaps)
+
+# regfitFull <- regsubsets(Price ~ ., data=vehicle_price_data, nbest=1, really.big=TRUE)
+
+# Summary of the best model of each size
+# summary(regfitFull)
+
+```
+
+
+```{r Interaction terms and Quadratic terms}
+# Basic Quadratic Terms
+fit1 <- lm(Price ~ Brand + Year + I(Year^2) + EngineDisplacement +
+           Kilometres + I(Kilometres^2) + DriveType + Cylinders + FuelType +
+           BodyType + UsedOrNew + Transmission + Litersper100km + Seats + State, 
+           data = vehicle_price_data)
+# Model 2: Selected Interactions
+fit2 <- lm(Price ~ Brand + Year + EngineDisplacement + Kilometres +
+           DriveType + Cylinders + FuelType + BodyType + UsedOrNew +
+           Transmission + Litersper100km + Seats + State +
+           EngineDisplacement:FuelType + Kilometres:Year, 
+           data = vehicle_price_data)
+
+# Model 3: Quadratic Terms with Key Interactions
+fit3 <- lm(Price ~ Brand + I(Year^2) + EngineDisplacement + 
+           Kilometres + I(Kilometres^2) + DriveType + Cylinders + 
+           FuelType + BodyType + UsedOrNew + Transmission + 
+           Litersper100km + Seats + State +
+           EngineDisplacement:Kilometres + Year:Kilometres, 
+           data = vehicle_price_data)
+
+
+summary(fit1)
+summary(fit2)
+summary(fit3)
+```
+
+```{r Residual Analysis}
+residuals = fit3$residuals
+head(residuals)
+hist(fit3$residuals, breaks = 20)
+```
+
+
+```{r Model plots}
+plot(fit3)
+```
+
+
+```{r Quadratic Terms with Key Interactions and price transformation}
+# Model 4: Quadratic Terms with Key Interactions and price transformation
+fit4 <- lm(log(Price) ~ Brand + I(Year^2) + EngineDisplacement + I(EngineDisplacement^2) + 
+           Kilometres + I(Kilometres^2) + DriveType + Cylinders + 
+           FuelType + BodyType + UsedOrNew + Transmission + 
+           Litersper100km + Seats + State +
+           EngineDisplacement:Kilometres + Year:Kilometres, 
+           data = vehicle_price_data)
+summary(fit4)
+plot(fit4)
+```
+
+
+```{r dropping outliers}
+indexes_to_drop <- c(5590,7797,13555,1982,11693)
+
+vehicle_price_data_filtered <- vehicle_price_data[-indexes_to_drop, ]
+vehicle_price_data_filtered
+vehicle_price_data
+```
+
+
+
+```{r Quadratic Terms with Key Interactions and price transformation on filtered data}
+# Model 5: Quadratic Terms with Key Interactions and price transformation
+fit5 <- lm(log(Price) ~ Brand + I(Year^2) + EngineDisplacement + I(EngineDisplacement^2) + 
+           Kilometres + I(Kilometres^2) + DriveType + Cylinders + 
+           FuelType + BodyType + UsedOrNew + Transmission + 
+           Litersper100km + Seats + State +
+           EngineDisplacement:Kilometres + Year:Kilometres, 
+           data = vehicle_price_data_filtered)
+summary(fit5)
+plot(fit5)
+```
+
+
+```{r Dummy variables}
+
+# Create dummy variables and automatically remove the first dummy for each categorical variable
+data_dummies <- dummy_cols(vehicle_price_data, select_columns = names(vehicle_price_data[sapply(vehicle_price_data, is.character)]), remove_first_dummy = TRUE)
+
+data_dummies <- data_dummies[, !(names(data_dummies) %in% names(vehicle_price_data[sapply(vehicle_price_data, is.character)]))]
+
+
+# View the first few rows of the transformed dataset
+head(data_dummies)
+
+
+set.seed(123) # For reproducibility
+splitIndex <- createDataPartition(data_dummies$Price, p = 0.80, list = FALSE)
+trainData <- data_dummies[splitIndex, ]
+testData <- data_dummies[-splitIndex, ]
+
+
+
+final_model <- lm((Price) ~ . , data = trainData)
+
+summary(final_model)
+plot(final_model)
+
+
+```
+
+
+
+```{r Model Evaluation}
+predictedPrices <- predict(final_model, testData)
+
+rmse_val <- sqrt(mean(((testData$Price) - predictedPrices)^2))
+mse_val <- mean(((testData$Price) - predictedPrices)^2)
+mae_val <- mean(abs((testData$Price) - predictedPrices))
+
+print(paste("RMSE:", rmse_val))
+print(paste("MSE:", mse_val))
+print(paste("MAE:", mae_val))
+
+# Manual calculation for R-squared on test data
+sse <- sum(((testData$Price) - predictedPrices)^2)
+sst <- sum(((testData$Price) - mean(testData$Price))^2)
+r_squared <- 1 - sse/sst
+
+# Adjusted R-squared
+n <- nrow(testData) # Number of observations in the test set
+p <- length(final_model$coefficients) - 1 # Number of predictors
+adj_r_squared <- 1 - ((1-r_squared)*(n-1))/(n-p-1)
+
+print(paste("R-squared on Test Set:", r_squared))
+print(paste("Adjusted R-squared on Test Set:", adj_r_squared))
+```
+
+
+```{r Metrics}
+# RMSE
+rmse <- function(errors) {
+  sqrt(mean(errors^2))
+}
+
+# MAE
+mae <- function(errors) {
+  mean(abs(errors))
+}
+
+# R-Squared
+r_squared <- function(y, predictions) {
+  1 - sum((y - predictions)^2) / sum((y - mean(y))^2)
+}
+
+# Adjusted R-Squared
+adjusted_r_squared <- function(y, predictions, p) {
+  n <- length(y)
+  1 - (1 - r_squared(y, predictions)) * (n - 1) / (n - p - 1)
+}
+
+# Calculate metrics for each model
+calculate_metrics <- function(y_test, predictions_model, p) {
+  errors <- predictions_model - y_test
+  list(
+    RMSE = rmse(errors),
+    MAE = mae(errors),
+    R_Squared = r_squared(y_test, predictions_model),
+    Adjusted_R_Squared = adjusted_r_squared(y_test, predictions_model, p)
+  )
+}
+
+```
+
+
+
+```{r Lasso and Ridge Regression}
+
+X <- as.matrix(vehicle_price_data[,1:14])
+Y <- as.matrix(vehicle_price_data[,15])
+
+
+
+set.seed(123)
+train_indices <- sample(1:nrow(X), size = floor(0.8*nrow(X)))
+X_train <- X[train_indices,]
+Y_train <- Y[train_indices]
+X_test <- X[-train_indices,]
+Y_test <- Y[-train_indices]
+
+
+# Fit Lasso model
+lasso_model <- glmnet(X_train, Y_train, alpha = 1)
+
+# Predict on test set
+predictions_lasso <- predict(lasso_model, s = 0.01, newx = X_test)
+
+
+# Fit Ridge model
+ridge_model <- glmnet(X_train, Y_train, alpha = 0)
+
+# Predict on test set
+predictions_ridge <- predict(ridge_model, s = 0.01, newx = X_test)
+
+# Fit Elastic Net model (e.g., alpha = 0.5 for a balanced approach)
+elastic_net_model <- glmnet(X_train, Y_train, alpha = 0.5)
+
+# Predict on test set
+predictions_elastic_net <- predict(elastic_net_model, s = 0.01, newx = X_test)
+
+
+# For Lasso Model
+metrics_lasso <- calculate_metrics(Y_test, predictions_lasso, length(coef(lasso_model)[-1]))
+
+# For Ridge Model
+metrics_ridge <- calculate_metrics(Y_test, predictions_ridge, length(coef(ridge_model)[-1]))
+
+# For Elastic Net Model
+metrics_elastic_net <- calculate_metrics(Y_test, predictions_elastic_net, length(coef(elastic_net_model)[-1]))
+
+
+
+# Print metrics
+print('Metrics of Lasso')
+print(metrics_lasso)
+print('Metrics of Ridge')
+print(metrics_ridge)
+print('Metrics of Elastic Net')
+print(metrics_elastic_net)
+```
+
+
+
+
